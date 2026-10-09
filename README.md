@@ -224,7 +224,7 @@ The `formats` list mirrors the `AudioFormat` union in TypeScript and the Rust
 | Format | Android | iOS | Windows | Linux | macOS |
 |--------|---------|-----|---------|-------|-------|
 | WAV/PCM | AudioRecord + WAV header | AVAudioRecorder LPCM | cpal + hound | cpal + hound | cpal + hound |
-| FLAC | — | — | `flacenc` | `flacenc` | `flacenc` |
+| FLAC | `flacenc` (Rust, in-process) | `flacenc` (Rust, in-process) | `flacenc` | `flacenc` | `flacenc` |
 | Opus | MediaRecorder OGG (API 29+) | pending (libopus FFI) | vendored libopus | vendored libopus | vendored libopus |
 | M4A/AAC | MediaRecorder | AVAudioRecorder (AAC) | webview `MediaRecorder` | webview `MediaRecorder` | webview `MediaRecorder` |
 
@@ -248,11 +248,13 @@ current platform.
 ### FLAC notes
 
 FLAC is **lossless compressed** audio: it preserves the exact PCM samples of WAV
-at roughly half the size. It is produced today on **desktop** (Windows, Linux and
-macOS) by the pure-Rust `flacenc` encoder (no C dependency). **Android and iOS do
-not support FLAC yet**, so `getSupportedFormats()` omits it on those platforms;
-check it before requesting FLAC. Because it is lossless, FLAC is the preferred
-archival alternative to WAV when size matters.
+at roughly half the size. It is produced on **all platforms** by the same
+pure-Rust `flacenc` encoder (no C dependency): on desktop inside the native
+capture path, and on **Android/iOS the native capture hands the PCM to that same
+in-process encoder** (Option B). The PCM is buffered in memory and encoded when
+recording stops, so very long recordings use memory proportional to their length.
+Because it is lossless, FLAC is the preferred archival alternative to WAV when
+size matters.
 
 ### Opus notes
 

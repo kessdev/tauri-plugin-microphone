@@ -86,6 +86,7 @@ class MicrophonePlugin(private val activity: Activity) : Plugin(activity) {
   private var outputFile: File? = null
   private var effectiveFormat = "wav"
   private var pendingClip: JSObject? = null
+  private var flacHandle = 0L
 
   @Volatile private var meterActive = false
   private var meterOptions = MeterOptions()
@@ -125,10 +126,19 @@ class MicrophonePlugin(private val activity: Activity) : Plugin(activity) {
 
     sampleRate = args.sampleRate ?: DEFAULT_SAMPLE_RATE
     channels = if ((args.channels ?: 1) >= 2) 2 else 1
-    // Opus needs API 29+; otherwise degrade to WAV and report the real format.
-    effectiveFormat = AudioMath.effectiveFormat(args.format)
-    if (effectiveFormat == "opus" && !AudioMath.supportsOpus(Build.VERSION.SDK_INT)) {
-      effectiveFormat = "wav"
+    // Use the requested format only when the platform supports it; otherwise
+    // degrade to WAV and report the real format (never mislabel the container).
+    effectiveFormat = AudioMath.resolveFormat(
+      args.format,
+      AudioMath.supportedFormats(Build.VERSION.SDK_INT)
+    )
+    flacHandle = 0L
+    if (effectiveFormat == "flac") {
+      flacHandle = FlacEncoder.nativeOpen(sampleRate, channels)
+      if (flacHandle == 0L) {
+        // Encoder unavailable: degrade to WAV coherently.
+        effectiveFormat = "wav"
+      }
     }
     outputFile = File(
       activity.cacheDir,
@@ -228,13 +238,17 @@ class MicrophonePlugin(private val activity: Activity) : Plugin(activity) {
           }
           val read = rec.read(buffer, 0, buffer.size)
           if (read > 0) {
-            var bi = 0
-            for (i in 0 until read) {
-              val sample = buffer[i].toInt()
-              bytes[bi++] = (sample and 0xff).toByte()
-              bytes[bi++] = ((sample shr 8) and 0xff).toByte()
+            if (flacHandle != 0L) {
+              FlacEncoder.nativeWrite(flacHandle, buffer, read)
+            } else {
+              var bi = 0
+              for (i in 0 until read) {
+                val sample = buffer[i].toInt()
+                bytes[bi++] = (sample and 0xff).toByte()
+                bytes[bi++] = ((sample shr 8) and 0xff).toByte()
+              }
+              synchronized(pcm) { pcm.write(bytes, 0, read * 2) }
             }
-            synchronized(pcm) { pcm.write(bytes, 0, read * 2) }
             frames += (read / channels).toLong()
             if (meterActive) emitMeter(buffer, read)
             if (maxFrames > 0 && frames >= maxFrames) {
@@ -263,6 +277,20 @@ class MicrophonePlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun finalizeFile(): JSObject? {
     val out = outputFile ?: return null
+    if (flacHandle != 0L) {
+      val handle = flacHandle
+      flacHandle = 0L
+      val result = FlacEncoder.nativeFinish(handle, out.absolutePath)
+      if (result != 0) {
+        Logger.error("Failed to finalize FLAC file (code $result)")
+        return null
+      }
+      val clip = JSObject()
+      clip.put("path", out.absolutePath)
+      clip.put("duration", AudioMath.durationSeconds(frames, sampleRate))
+      clip.put("format", "flac")
+      return clip
+    }
     val data: ByteArray
     synchronized(pcm) { data = pcm.toByteArray() }
     try {

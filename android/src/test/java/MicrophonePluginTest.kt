@@ -86,12 +86,23 @@ class MicrophonePluginTest {
   }
 
   @Test
+  fun resolveFormatDegradesUnsupported() {
+    val supported = listOf("wav", "m4a", "aac")
+    assertEquals("m4a", AudioMath.resolveFormat("m4a", supported))
+    assertEquals("wav", AudioMath.resolveFormat("flac", supported))
+    assertEquals("wav", AudioMath.resolveFormat("opus", supported))
+    assertEquals("wav", AudioMath.resolveFormat(null, supported))
+    assertEquals("opus", AudioMath.resolveFormat("opus", supported + "opus"))
+  }
+
+  @Test
   fun supportedFormatsDependOnApiLevel() {
     assertArrayEquals(
-      arrayOf("wav", "m4a", "aac"),
+      arrayOf("wav", "m4a", "aac", "flac"),
       AudioMath.supportedFormats(28).toTypedArray()
     )
     assertTrue(AudioMath.supportedFormats(29).contains("opus"))
+    assertTrue(AudioMath.supportedFormats(28).contains("flac"))
   }
 
   @Test
@@ -145,6 +156,12 @@ class MicrophonePluginTest {
     assertEquals("m4a", AudioMath.effectiveFormat("m4a"))
     assertEquals("aac", AudioMath.effectiveFormat("aac"))
     assertEquals("wav", AudioMath.effectiveFormat("unknown"))
+  }
+
+  @Test
+  fun flacIsSupportedOnAndroid() {
+    assertTrue(AudioMath.supportedFormats(28).contains("flac"))
+    assertEquals("flac", AudioMath.resolveFormat("flac", AudioMath.supportedFormats(28)))
   }
 
   @Test

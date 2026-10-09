@@ -43,7 +43,7 @@ enum AudioMath {
 
   /// Formats guaranteed/progressive on iOS.
   static func supportedFormats() -> [String] {
-    return ["wav", "m4a", "aac"]
+    return ["wav", "m4a", "aac", "flac"]
   }
 
   /// Converts interleaved 16-bit samples to little-endian bytes.
@@ -72,6 +72,13 @@ enum AudioMath {
     case "opus": return "opus"
     default: return "wav"
     }
+  }
+
+  /// Resolves the format to capture: the requested one when it is supported by
+  /// the platform, otherwise `wav` (never a mislabeled container).
+  static func resolveFormat(_ requested: String?, supported: [String]) -> String {
+    guard let requested = requested, supported.contains(requested) else { return "wav" }
+    return requested
   }
 
   static func effectiveFormat(_ format: String?) -> String {

@@ -12,6 +12,7 @@ mod mobile;
 
 mod commands;
 mod error;
+mod flac;
 mod models;
 
 #[cfg(desktop)]

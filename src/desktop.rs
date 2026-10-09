@@ -560,7 +560,7 @@ impl<R: Runtime> Microphone<R> {
               let _ = writer.finalize();
             }
             Sink::Pcm(samples) => {
-              let _ = encode_flac(&thread_path, &samples, channels, sample_rate);
+              let _ = crate::flac::encode_flac(&thread_path, &samples, channels, sample_rate);
             }
             Sink::Opus(opus) => {
               let _ = opus.finish(&thread_path);
@@ -616,26 +616,6 @@ fn opus_sample_rate(requested: u32) -> u32 {
   } else {
     48_000
   }
-}
-
-/// Encodes interleaved 16-bit PCM samples to a FLAC file (pure Rust).
-fn encode_flac(path: &Path, samples: &[i16], channels: u16, sample_rate: u32) -> Result<()> {
-  use flacenc::component::BitRepr;
-  use flacenc::error::Verify;
-
-  let signal: Vec<i32> = samples.iter().map(|&s| i32::from(s)).collect();
-  let config = flacenc::config::Encoder::default()
-    .into_verified()
-    .map_err(|(_, e)| Error::message(format!("FLAC config error: {e:?}")))?;
-  let source =
-    flacenc::source::MemSource::from_samples(&signal, channels as usize, 16, sample_rate as usize);
-  let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
-    .map_err(|e| Error::message(format!("FLAC encoding failed: {e}")))?;
-  let mut sink = flacenc::bitsink::ByteSink::new();
-  stream
-    .write(&mut sink)
-    .map_err(|e| Error::message(format!("FLAC serialization failed: {e:?}")))?;
-  std::fs::write(path, sink.as_slice()).map_err(Error::Io)
 }
 
 /// Capabilities advertised by the guaranteed native desktop path.
@@ -954,16 +934,6 @@ mod tests {
     assert!(bytes.starts_with(b"OggS"));
     assert!(bytes.windows(8).any(|window| window == b"OpusHead"));
     assert!(bytes.windows(8).any(|window| window == b"OpusTags"));
-    let _ = std::fs::remove_file(&path);
-  }
-
-  #[test]
-  fn encodes_a_valid_flac_file() {
-    let path = std::env::temp_dir().join(format!("tauri-microphone-test-{}.flac", unique_id()));
-    let samples: Vec<i16> = (0..4096).map(|i| ((i % 100) as i16) * 50).collect();
-    encode_flac(&path, &samples, 1, 48_000).unwrap();
-    let bytes = std::fs::read(&path).unwrap();
-    assert!(bytes.starts_with(b"fLaC"));
     let _ = std::fs::remove_file(&path);
   }
 

@@ -52,6 +52,12 @@ final class MicrophonePluginTests: XCTestCase {
     XCTAssertTrue(AudioMath.supportedFormats().contains("wav"))
   }
 
+  func testSupportedFormatsIncludeFlac() {
+    XCTAssertTrue(AudioMath.supportedFormats().contains("flac"))
+    XCTAssertEqual(
+      AudioMath.resolveFormat("flac", supported: AudioMath.supportedFormats()), "flac")
+  }
+
   func testInt16LittleEndianBytes() {
     let bytes = AudioMath.int16ToLittleEndianBytes([1, -2, 258])
     XCTAssertEqual(bytes, [1, 0, 0xFE, 0xFF, 0x02, 0x01])
@@ -75,6 +81,15 @@ final class MicrophonePluginTests: XCTestCase {
     XCTAssertEqual(AudioMath.effectiveFormat("m4a"), "m4a")
     XCTAssertEqual(AudioMath.effectiveFormat("aac"), "aac")
     XCTAssertEqual(AudioMath.effectiveFormat("unknown"), "wav")
+  }
+
+  func testResolveFormatDegradesUnsupported() {
+    let supported = ["wav", "m4a", "aac"]
+    XCTAssertEqual(AudioMath.resolveFormat("m4a", supported: supported), "m4a")
+    XCTAssertEqual(AudioMath.resolveFormat("flac", supported: supported), "wav")
+    XCTAssertEqual(AudioMath.resolveFormat("opus", supported: supported), "wav")
+    XCTAssertEqual(AudioMath.resolveFormat(nil, supported: supported), "wav")
+    XCTAssertEqual(AudioMath.resolveFormat("opus", supported: supported + ["opus"]), "opus")
   }
 
   func testUnknownFormatDegradesToWav() {

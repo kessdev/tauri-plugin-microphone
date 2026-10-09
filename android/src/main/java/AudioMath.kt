@@ -129,7 +129,7 @@ internal object AudioMath {
 
   /** Formats guaranteed/progressive on the given Android API level. */
   fun supportedFormats(apiLevel: Int): List<String> {
-    val formats = mutableListOf("wav", "m4a", "aac")
+    val formats = mutableListOf("wav", "m4a", "aac", "flac")
     if (apiLevel >= 29) formats.add("opus")
     return formats
   }
@@ -187,6 +187,13 @@ internal object AudioMath {
 
   /** Whether Opus is available on the given API level (encoder added in API 29). */
   fun supportsOpus(apiLevel: Int): Boolean = apiLevel >= 29
+
+  /**
+   * Resolves the format to capture: the requested one when it is supported by
+   * the platform, otherwise `wav` (never a mislabeled container).
+   */
+  fun resolveFormat(requested: String?, supported: List<String>): String =
+    if (requested != null && supported.contains(requested)) requested else "wav"
 
   /** Effective format reported for a requested one. */
   fun effectiveFormat(format: String?): String = when (format) {

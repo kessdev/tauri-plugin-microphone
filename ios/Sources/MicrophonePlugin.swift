@@ -5,6 +5,21 @@ import Tauri
 import UIKit
 import WebKit
 
+// In-process FLAC encoder exposed by the Rust core (Option B). The symbols are
+// linked from the app's Rust library; see `src/flac.rs`.
+@_silgen_name("mic_flac_open")
+private func mic_flac_open(_ sampleRate: Int32, _ channels: Int32) -> UnsafeMutableRawPointer?
+
+@_silgen_name("mic_flac_write")
+private func mic_flac_write(
+  _ handle: UnsafeMutableRawPointer?, _ pcm: UnsafePointer<Int16>?, _ samples: Int32
+) -> Int32
+
+@_silgen_name("mic_flac_finish")
+private func mic_flac_finish(
+  _ handle: UnsafeMutableRawPointer?, _ path: UnsafePointer<CChar>?, _ pathLength: Int32
+) -> Int32
+
 struct RecordingOptions: Decodable {
   var format: String?
   var sampleRate: Int?
@@ -87,6 +102,12 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
   var streamSequence: UInt64 = 0
   var streamStartDate: Date?
 
+  var flacHandle: UnsafeMutableRawPointer?
+  var flacEngine: AVAudioEngine?
+  var flacFrameCount: Int64 = 0
+  var flacPaused = false
+  var pendingClip: AudioClip?
+
   override func load(webview: WKWebView) {
     self.webView = webview
   }
@@ -132,16 +153,21 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
     sampleRate = options.sampleRate ?? 48_000
     channels = options.channels ?? 1
     let requested = options.format
-    let effective = AudioMath.effectiveFormat(requested)
+    let effective = AudioMath.resolveFormat(requested, supported: AudioMath.supportedFormats())
     currentFormat = effective
     let url = FileManager.default.temporaryDirectory
       .appendingPathComponent(
-        "tauri-microphone-\(Int(Date().timeIntervalSince1970 * 1000)).\(AudioMath.effectiveExtension(requested))"
+        "tauri-microphone-\(Int(Date().timeIntervalSince1970 * 1000)).\(AudioMath.effectiveExtension(effective))"
       )
     outputURL = url
 
+    if effective == "flac" {
+      startFlacRecording(options: options, invoke: invoke)
+      return
+    }
+
     let settings: [String: Any]
-    if AudioMath.usesAacContainer(requested) {
+    if AudioMath.usesAacContainer(effective) {
       settings = [
         AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
         AVSampleRateKey: Double(sampleRate),
@@ -184,19 +210,123 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
 
   private func autoStop() {
     guard stateMachine.state != RecordingStateMachine.idle else { return }
+    if flacHandle != nil || flacEngine != nil {
+      let duration = currentDuration()
+      let ok = finalizeFlacFile()
+      segmentStart = nil
+      try? stateMachine.stop()
+      if ok, let url = outputURL {
+        pendingClip = AudioClip(path: url.path, duration: duration, format: "flac")
+      }
+      return
+    }
     recorder?.stop()
     recorder = nil
     try? stateMachine.stop()
     segmentStart = nil
   }
 
+  // MARK: FLAC (Option B: native PCM -> in-process Rust encoder)
+
+  private func startFlacRecording(options: RecordingOptions, invoke: Invoke) {
+    let session = AVAudioSession.sharedInstance()
+    try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+    try? session.setActive(true)
+
+    guard let handle = mic_flac_open(Int32(sampleRate), Int32(channels)) else {
+      stateMachine.forceIdle()
+      invoke.reject("Failed to create the FLAC encoder")
+      return
+    }
+    flacHandle = handle
+    flacFrameCount = 0
+    flacPaused = false
+    currentFormat = "flac"
+
+    let engine = AVAudioEngine()
+    let input = engine.inputNode
+    let format = input.inputFormat(forBus: 0)
+    input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self] buffer, _ in
+      self?.emitFlacBuffer(buffer)
+    }
+    engine.prepare()
+    do {
+      try engine.start()
+    } catch {
+      input.removeTap(onBus: 0)
+      _ = finalizeFlacFile()
+      invoke.reject("Failed to start FLAC recording: \(error.localizedDescription)")
+      return
+    }
+    flacEngine = engine
+    accumulatedDuration = 0
+    segmentStart = Date()
+
+    if let maxDuration = options.maxDuration, maxDuration > 0 {
+      let work = DispatchWorkItem { [weak self] in self?.autoStop() }
+      maxDurationTimer = work
+      DispatchQueue.main.asyncAfter(deadline: .now() + maxDuration, execute: work)
+    }
+    invoke.resolve()
+  }
+
+  private func emitFlacBuffer(_ buffer: AVAudioPCMBuffer) {
+    guard let handle = flacHandle, !flacPaused else { return }
+    let frameLength = Int(buffer.frameLength)
+    guard frameLength > 0, let channelData = buffer.floatChannelData else { return }
+    let channelCount = Int(buffer.format.channelCount)
+
+    var samples = [Int16]()
+    samples.reserveCapacity(frameLength * channelCount)
+    for frame in 0..<frameLength {
+      for channel in 0..<channelCount {
+        let value = channelData[channel][frame]
+        samples.append(Int16(max(-1.0, min(1.0, value)) * Float(Int16.max)))
+      }
+    }
+    samples.withUnsafeBufferPointer { pointer in
+      _ = mic_flac_write(handle, pointer.baseAddress, Int32(samples.count))
+    }
+    flacFrameCount += Int64(frameLength)
+  }
+
+  @discardableResult
+  private func finalizeFlacFile() -> Bool {
+    flacEngine?.inputNode.removeTap(onBus: 0)
+    flacEngine?.stop()
+    flacEngine = nil
+    guard let handle = flacHandle, let url = outputURL else { return false }
+    flacHandle = nil
+    let path = url.path
+    let result = path.withCString { mic_flac_finish(handle, $0, Int32(path.utf8.count)) }
+    return result == 0
+  }
+
   @objc private func stopRecording(_ invoke: Invoke) throws {
+    if let clip = pendingClip {
+      pendingClip = nil
+      invoke.resolve(clip)
+      return
+    }
     guard stateMachine.state != RecordingStateMachine.idle else {
       invoke.reject("cannot stop while idle")
       return
     }
     maxDurationTimer?.cancel()
     let duration = currentDuration()
+
+    if flacEngine != nil || flacHandle != nil {
+      let ok = finalizeFlacFile()
+      segmentStart = nil
+      try? stateMachine.stop()
+      guard ok, let url = outputURL else {
+        invoke.reject("Failed to finalize the FLAC recording")
+        return
+      }
+      invoke.resolve(AudioClip(path: url.path, duration: duration, format: "flac"))
+      return
+    }
+
     recorder?.stop()
     recorder = nil
     segmentStart = nil
@@ -218,7 +348,11 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
     }
     accumulatedDuration = currentDuration()
     segmentStart = nil
-    recorder?.pause()
+    if flacHandle != nil {
+      flacPaused = true
+    } else {
+      recorder?.pause()
+    }
     invoke.resolve()
   }
 
@@ -230,7 +364,11 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
       return
     }
     segmentStart = Date()
-    recorder?.record()
+    if flacHandle != nil {
+      flacPaused = false
+    } else {
+      recorder?.record()
+    }
     invoke.resolve()
   }
 
