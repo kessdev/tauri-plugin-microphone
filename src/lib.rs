@@ -14,6 +14,9 @@ mod commands;
 mod error;
 mod models;
 
+#[cfg(desktop)]
+mod state;
+
 pub use error::{Error, Result};
 
 #[cfg(desktop)]
@@ -21,7 +24,8 @@ use desktop::Microphone;
 #[cfg(mobile)]
 use mobile::Microphone;
 
-/// Extensions to [`tauri::App`], [`tauri::AppHandle`] and [`tauri::Window`] to access the microphone APIs.
+/// Extensions to [`tauri::App`], [`tauri::AppHandle`], [`tauri::WebviewWindow`],
+/// [`tauri::Webview`] and [`tauri::Window`] to access the microphone APIs.
 pub trait MicrophoneExt<R: Runtime> {
   fn microphone(&self) -> &Microphone<R>;
 }
@@ -34,8 +38,23 @@ impl<R: Runtime, T: Manager<R>> crate::MicrophoneExt<R> for T {
 
 /// Initializes the plugin.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-  Builder::new("microphone")
-    .invoke_handler(tauri::generate_handler![commands::ping])
+  Builder::new("microphone-kessdev")
+    .invoke_handler(tauri::generate_handler![
+      commands::start_recording,
+      commands::stop_recording,
+      commands::pause_recording,
+      commands::resume_recording,
+      commands::get_recording_state,
+      commands::get_capabilities,
+      commands::get_supported_formats,
+      commands::check_permissions,
+      commands::request_permissions,
+      commands::open_app_settings,
+      commands::start_meter,
+      commands::stop_meter,
+      commands::start_audio_stream,
+      commands::stop_audio_stream,
+    ])
     .setup(|app, api| {
       #[cfg(mobile)]
       let microphone = mobile::init(app, api)?;

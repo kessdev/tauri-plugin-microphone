@@ -1,0 +1,169 @@
+name: verify
+
+on:
+  workflow_call:
+
+jobs:
+  verify-rust:
+    name: verify (rust / desktop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential
+
+      - name: format
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test
+
+      - name: check mobile target
+        run: cargo check --target aarch64-linux-android
+
+      - name: check example app (desktop)
+        working-directory: examples/tauri-app/src-tauri
+        run: cargo check
+
+  verify-js:
+    name: verify (javascript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: test
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+  verify-android:
+    name: verify (android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: install Android SDK packages
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)"
+          echo "Using sdkmanager: $SDKMANAGER"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: setup Gradle (cache)
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: build plugin JS bindings
+        run: |
+          npm ci
+          npm run build
+
+      - name: install example dependencies
+        working-directory: examples/tauri-app
+        run: npm install
+
+      - name: generate Android project
+        working-directory: examples/tauri-app
+        run: npx tauri android init
+
+      - name: build Android (debug) — generates tauri.settings.gradle
+        working-directory: examples/tauri-app
+        run: npx tauri android build --debug
+
+      - name: run Kotlin unit tests
+        working-directory: examples/tauri-app/src-tauri/gen/android
+        run: ./gradlew test
+
+  verify-ios:
+    name: verify (ios)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: download Rust dependencies
+        run: cargo fetch
+
+      - name: link Tauri iOS API for the plugin tests
+        run: |
+          SRC="$(find "${CARGO_HOME:-$HOME/.cargo}/registry/src" -type d -path '*/tauri-*/mobile/ios-api' 2>/dev/null | sort | tail -1)"
+          echo "Tauri iOS API: $SRC"
+          test -n "$SRC"
+          mkdir -p .tauri
+          cp -R "$SRC" .tauri/tauri-api
+
+      - name: run Swift tests on iOS Simulator
+        working-directory: ios
+        run: |
+          xcodebuild -list -json
+          SCHEME="$(xcodebuild -list -json | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('workspace') or d.get('project') or {}; s=r.get('schemes') or []; print(s[0] if s else '')")"
+          SIM="$(xcrun simctl list devices available | grep -m1 -E '^[[:space:]]+iPhone' | sed -E 's/^[[:space:]]+//; s/ \(.*//')"
+          echo "scheme=$SCHEME simulator=$SIM"
+          test -n "$SCHEME"
+          test -n "$SIM"
+          xcodebuild test -scheme "$SCHEME" -destination "platform=iOS Simulator,name=$SIM"
+
+  verify-windows:
+    name: verify (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: format
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test

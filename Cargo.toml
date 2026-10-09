@@ -1,17 +1,27 @@
 [package]
-name = "tauri-plugin-microphone"
+name = "tauri-plugin-microphone-kessdev"
 version = "0.1.0"
-authors = [ "You" ]
-description = ""
-edition = "2024"
-rust-version = "1.90"
-exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
-links = "tauri-plugin-microphone"
+authors = [ "kess" ]
+description = "Microphone plugin for Tauri v2: cross-platform audio recording, live metering and raw audio streaming on Android, iOS and desktop."
+license = "MIT"
+repository = "https://github.com/kessdev/tauri-plugin-microphone"
+edition = "2021"
+rust-version = "1.77.2"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules", "/.changes", "/.github"]
+links = "tauri-plugin-microphone-kessdev"
 
 [dependencies]
 tauri = { version = "2.12.1" }
-serde = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+cpal = "0.15"
+hound = "3.5"
+flacenc = "0.5"
+opus-head-sys = { version = "0.3", default-features = false }
+ogg = "0.9"
 
 [build-dependencies]
 tauri-plugin = { version = "2.7.1", features = ["build"] }

@@ -1,3 +1,20 @@
 [default]
-description = "Default permissions for the plugin"
-permissions = ["allow-ping"]
+description = "Default permissions for the microphone plugin"
+permissions = [
+  "allow-start-recording",
+  "allow-stop-recording",
+  "allow-pause-recording",
+  "allow-resume-recording",
+  "allow-get-recording-state",
+  "allow-get-capabilities",
+  "allow-get-supported-formats",
+  "allow-check-permissions",
+  "allow-request-permissions",
+  "allow-open-app-settings",
+  "allow-start-meter",
+  "allow-stop-meter",
+  "allow-start-audio-stream",
+  "allow-stop-audio-stream",
+  "allow-register-listener",
+  "allow-remove-listener",
+]

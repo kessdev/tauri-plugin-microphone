@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-get-supported-formats"
+description = "Enables the get_supported_formats command without any pre-configured scope."
+commands.allow = ["get_supported_formats"]
+
+[[permission]]
+identifier = "deny-get-supported-formats"
+description = "Denies the get_supported_formats command without any pre-configured scope."
+commands.deny = ["get_supported_formats"]

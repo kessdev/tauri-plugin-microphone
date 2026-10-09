@@ -1,0 +1,35 @@
+{
+  "gitSiteUrl": "https://github.com/kessdev/tauri-plugin-microphone/",
+  "pkgManagers": {
+    "rust": {
+      "version": true,
+      "getPublishedVersion": {
+        "use": "fetch:check",
+        "options": {
+          "url": "https://crates.io/api/v1/crates/${ pkg.pkgFile.pkg.package.name }/${ pkg.pkgFile.version }"
+        }
+      },
+      "publish": "cargo publish --no-verify"
+    },
+    "javascript": {
+      "version": true,
+      "getPublishedVersion": {
+        "use": "fetch:check",
+        "options": {
+          "url": "https://registry.npmjs.com/${ pkg.pkgFile.pkg.name }/${ pkg.pkgFile.version }"
+        }
+      },
+      "publish": "npm publish --access public"
+    }
+  },
+  "packages": {
+    "tauri-plugin-microphone-kessdev": {
+      "path": "./",
+      "manager": "rust"
+    },
+    "tauri-plugin-microphone-kessdev-js": {
+      "path": "./",
+      "manager": "javascript"
+    }
+  }
+}
