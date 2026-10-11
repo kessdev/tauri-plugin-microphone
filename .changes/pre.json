@@ -1,6 +1,8 @@
 {
   "tag": "beta",
   "changes": [
-    ".changes/beta.md"
+    ".changes/beta.md",
+    ".changes/fix-ci.md",
+    ".changes/flac-mobile.md"
   ]
 }

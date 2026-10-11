@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-microphone-kessdev"
-version = "0.1.0"
+version = "0.1.1-beta.0"
 authors = [ "kess" ]
 description = "Microphone plugin for Tauri v2: cross-platform audio recording, live metering and raw audio streaming on Android, iOS and desktop."
 license = "MIT"
