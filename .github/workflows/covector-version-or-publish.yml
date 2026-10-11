@@ -1,0 +1,61 @@
+name: covector version or publish
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
+  version-or-publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      commandRan: ${{ steps.covector.outputs.commandRan }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: install plugin dependencies
+        run: npm ci
+
+      - name: git config
+        run: |
+          git config --global user.name "${{ github.event.pusher.name }}"
+          git config --global user.email "${{ github.event.pusher.email }}"
+
+      - name: covector version or publish
+        uses: jbolda/covector/packages/action@covector-v0
+        id: covector
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        with:
+          command: 'version-or-publish'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          createRelease: true
+
+      - name: create pull request
+        if: steps.covector.outputs.commandRan == 'version'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: release/version-updates
+          title: Apply Version Updates From Current Changes
+          commit-message: 'apply version updates'
+          body: ${{ steps.covector.outputs.change }}

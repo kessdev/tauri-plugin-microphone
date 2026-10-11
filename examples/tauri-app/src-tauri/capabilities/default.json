@@ -7,6 +7,6 @@
   ],
   "permissions": [
     "core:default",
-    "microphone:default"
+    "microphone-kessdev:default"
   ]
 }

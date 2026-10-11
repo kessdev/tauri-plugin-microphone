@@ -1,0 +1,9 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
