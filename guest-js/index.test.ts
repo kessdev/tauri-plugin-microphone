@@ -38,7 +38,8 @@ import {
   stopAudioStream,
   requestPermissions as requestMicPermissions,
   checkPermissions as checkMicPermissions,
-  openAppSettings
+  openAppSettings,
+  getAnalyserNode
 } from './index'
 
 const invokeMock = vi.mocked(invoke)
@@ -331,5 +332,97 @@ describe('desktop clip contract', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('desktop metering', () => {
+  class FakeAnalyser {
+    fftSize = 8
+    private samples = new Float32Array([0.1, 0.5, -0.5, 0.25, 0, 0, 0, 0])
+    getFloatTimeDomainData(target: Float32Array): void {
+      target.set(this.samples.subarray(0, target.length))
+    }
+  }
+
+  class FakeMediaRecorder {
+    state = 'inactive'
+    mimeType = 'audio/webm'
+    ondataavailable: ((event: { data: Blob }) => void) | null = null
+    onstop: (() => void) | null = null
+    onerror: (() => void) | null = null
+    constructor(public stream: unknown) {}
+    start(): void {
+      this.state = 'recording'
+    }
+    stop(): void {
+      this.state = 'inactive'
+      this.onstop?.()
+    }
+    pause(): void {
+      this.state = 'paused'
+    }
+    resume(): void {
+      this.state = 'recording'
+    }
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      mediaDevices: {
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: () => {} }] })
+      }
+    })
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        createMediaStreamSource(): { connect: () => void } {
+          return { connect: () => {} }
+        }
+        createAnalyser(): FakeAnalyser {
+          return new FakeAnalyser()
+        }
+        close(): Promise<void> {
+          return Promise.resolve()
+        }
+      }
+    )
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('emits meter data when subscribed before recording', async () => {
+    vi.useFakeTimers()
+    try {
+      const callback = vi.fn()
+      const unlisten = onMeter(callback, { intervalMs: 10 })
+      expect(callback).not.toHaveBeenCalled()
+
+      await startRecording()
+      await vi.advanceTimersByTimeAsync(30)
+
+      expect(callback).toHaveBeenCalled()
+      const event = callback.mock.calls[0][0]
+      expect(event.peak).toBeGreaterThan(0)
+      expect(event.level).toBeGreaterThanOrEqual(0)
+
+      unlisten()
+      await stopRecording()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('getAnalyserNode reflects the active capture', async () => {
+    expect(getAnalyserNode()).toBeNull()
+    await startRecording()
+    expect(getAnalyserNode()).not.toBeNull()
+    await stopRecording()
+    expect(getAnalyserNode()).toBeNull()
   })
 })

@@ -1,24 +1,43 @@
 // Copyright 2024-present
 
 import AVFoundation
+import Darwin
 import Tauri
 import UIKit
 import WebKit
 
-// In-process FLAC encoder exposed by the Rust core (Option B). The symbols are
-// linked from the app's Rust library; see `src/flac.rs`.
-@_silgen_name("mic_flac_open")
-private func mic_flac_open(_ sampleRate: Int32, _ channels: Int32) -> UnsafeMutableRawPointer?
-
-@_silgen_name("mic_flac_write")
-private func mic_flac_write(
-  _ handle: UnsafeMutableRawPointer?, _ pcm: UnsafePointer<Int16>?, _ samples: Int32
+// In-process FLAC encoder exposed by the Rust core (Option B); see `src/flac.rs`.
+//
+// The app links the Rust static library (`tauri_app_lib`) into its executable,
+// so the `mic_flac_*` symbols are present at runtime. The Swift package is also
+// built and tested on its own (CI runs `xcodebuild test` against the package),
+// where those symbols are absent. To keep the package linkable without the Rust
+// library, the symbols are resolved at runtime with `dlsym` instead of being
+// referenced at link time. When they are missing, the FLAC path degrades to WAV
+// (see `AudioMath.resolveFormat(_:supported:flacEncoderAvailable:)`).
+private typealias MicFlacOpenFn = @convention(c) (Int32, Int32) -> UnsafeMutableRawPointer?
+private typealias MicFlacWriteFn = @convention(c) (
+  UnsafeMutableRawPointer?, UnsafePointer<Int16>?, Int32
+) -> Int32
+private typealias MicFlacFinishFn = @convention(c) (
+  UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32
 ) -> Int32
 
-@_silgen_name("mic_flac_finish")
-private func mic_flac_finish(
-  _ handle: UnsafeMutableRawPointer?, _ path: UnsafePointer<CChar>?, _ pathLength: Int32
-) -> Int32
+enum FlacEncoder {
+  fileprivate static let open: MicFlacOpenFn? = resolve("mic_flac_open")
+  fileprivate static let write: MicFlacWriteFn? = resolve("mic_flac_write")
+  fileprivate static let finish: MicFlacFinishFn? = resolve("mic_flac_finish")
+
+  /// Whether the in-process encoder is linked into the current process.
+  static var available: Bool { open != nil && write != nil && finish != nil }
+
+  /// `RTLD_DEFAULT` (`(void *) -2`) searches every loaded image, so the symbols
+  /// resolve when the Rust static library is linked into the host executable.
+  private static func resolve<T>(_ name: String) -> T? {
+    guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) else { return nil }
+    return unsafeBitCast(symbol, to: T.self)
+  }
+}
 
 struct RecordingOptions: Decodable {
   var format: String?
@@ -153,7 +172,11 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
     sampleRate = options.sampleRate ?? 48_000
     channels = options.channels ?? 1
     let requested = options.format
-    let effective = AudioMath.resolveFormat(requested, supported: AudioMath.supportedFormats())
+    let effective = AudioMath.resolveFormat(
+      requested,
+      supported: AudioMath.supportedFormats(),
+      flacEncoderAvailable: FlacEncoder.available
+    )
     currentFormat = effective
     let url = FileManager.default.temporaryDirectory
       .appendingPathComponent(
@@ -233,7 +256,7 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
     try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
     try? session.setActive(true)
 
-    guard let handle = mic_flac_open(Int32(sampleRate), Int32(channels)) else {
+    guard let handle = FlacEncoder.open?(Int32(sampleRate), Int32(channels)) else {
       stateMachine.forceIdle()
       invoke.reject("Failed to create the FLAC encoder")
       return
@@ -285,7 +308,7 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
       }
     }
     samples.withUnsafeBufferPointer { pointer in
-      _ = mic_flac_write(handle, pointer.baseAddress, Int32(samples.count))
+      _ = FlacEncoder.write?(handle, pointer.baseAddress, Int32(samples.count))
     }
     flacFrameCount += Int64(frameLength)
   }
@@ -298,7 +321,7 @@ class MicrophonePlugin: Plugin, AVAudioRecorderDelegate {
     guard let handle = flacHandle, let url = outputURL else { return false }
     flacHandle = nil
     let path = url.path
-    let result = path.withCString { mic_flac_finish(handle, $0, Int32(path.utf8.count)) }
+    let result = path.withCString { FlacEncoder.finish?(handle, $0, Int32(path.utf8.count)) ?? -1 }
     return result == 0
   }
 

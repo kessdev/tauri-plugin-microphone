@@ -58,6 +58,23 @@ final class MicrophonePluginTests: XCTestCase {
       AudioMath.resolveFormat("flac", supported: AudioMath.supportedFormats()), "flac")
   }
 
+  func testFlacDegradesWhenEncoderUnavailable() {
+    let supported = AudioMath.supportedFormats()
+    XCTAssertEqual(
+      AudioMath.resolveFormat("flac", supported: supported, flacEncoderAvailable: false),
+      "wav")
+    XCTAssertEqual(
+      AudioMath.resolveFormat("flac", supported: supported, flacEncoderAvailable: true),
+      "flac")
+  }
+
+  func testFlacResolutionMatchesEncoderAvailability() {
+    let resolved = AudioMath.resolveFormat(
+      "flac", supported: AudioMath.supportedFormats(),
+      flacEncoderAvailable: FlacEncoder.available)
+    XCTAssertEqual(resolved, FlacEncoder.available ? "flac" : "wav")
+  }
+
   func testInt16LittleEndianBytes() {
     let bytes = AudioMath.int16ToLittleEndianBytes([1, -2, 258])
     XCTAssertEqual(bytes, [1, 0, 0xFE, 0xFF, 0x02, 0x01])

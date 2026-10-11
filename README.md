@@ -141,6 +141,14 @@ On **desktop** metering uses a Web Audio `AnalyserNode` (zero IPC). Use
 `getAnalyserNode()` to obtain it for custom visualization; it returns `null` on
 mobile, where the native backend computes and delivers `MeterData` instead.
 
+Desktop metering is bound to the **webview capture path** (`getUserMedia` +
+`MediaRecorder`): the `AnalyserNode` only exists while that recording is active,
+so `onMeter` works whether it is called before or after `startRecording` (the
+buffer is sized lazily) and `getAnalyserNode()` returns the node while recording.
+When the **desktop native path** is used (`format: 'wav' | 'flac' | 'opus'`),
+there is no `AnalyserNode`: `onMeter` does not emit and `getAnalyserNode()`
+returns `null`.
+
 ## Return contract
 
 ```ts
@@ -255,6 +263,11 @@ in-process encoder** (Option B). The PCM is buffered in memory and encoded when
 recording stops, so very long recordings use memory proportional to their length.
 Because it is lossless, FLAC is the preferred archival alternative to WAV when
 size matters.
+
+On **iOS** the in-process encoder is provided by the app's Rust static library and
+resolved at runtime; if those symbols are not linked (for example when the Swift
+package is built on its own), an iOS FLAC request degrades to WAV and reports
+`format: 'wav'` instead of returning an invalid file.
 
 ### Opus notes
 

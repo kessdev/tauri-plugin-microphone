@@ -434,11 +434,17 @@ export function onMeter(callback: (data: MeterData) => void, options?: MeterOpti
   const interval = options?.intervalMs ?? 100
   const floorDb = options?.floorDb ?? -60
   const scale = options?.scale ?? 'linear'
-  const buffer = analyser ? new Float32Array(analyser.fftSize) : null
+  let buffer: Float32Array<ArrayBuffer> | null = null
 
   if (meterTimer) clearInterval(meterTimer)
   meterTimer = setInterval(() => {
-    if (!analyser || !buffer) return
+    // The analyser only exists while the webview capture is active, so the
+    // buffer is sized lazily: subscribing before `startRecording` still works
+    // once the recording starts.
+    if (!analyser) return
+    if (!buffer || buffer.length !== analyser.fftSize) {
+      buffer = new Float32Array(analyser.fftSize)
+    }
     analyser.getFloatTimeDomainData(buffer)
     let peak = 0
     let sumSquares = 0

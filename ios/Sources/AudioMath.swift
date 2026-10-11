@@ -81,6 +81,16 @@ enum AudioMath {
     return requested
   }
 
+  /// Resolves the capture format, degrading FLAC to `wav` when the in-process
+  /// Rust encoder (`mic_flac_*`) is not linked into the current process.
+  static func resolveFormat(
+    _ requested: String?, supported: [String], flacEncoderAvailable: Bool
+  ) -> String {
+    let resolved = resolveFormat(requested, supported: supported)
+    if resolved == "flac" && !flacEncoderAvailable { return "wav" }
+    return resolved
+  }
+
   static func effectiveFormat(_ format: String?) -> String {
     switch format {
     case "m4a": return "m4a"

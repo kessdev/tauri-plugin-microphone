@@ -9,6 +9,15 @@ Add the following to the app's `Info.plist`:
 - `NSMicrophoneUsageDescription` — required to access the microphone.
 - `UIBackgroundModes` containing `audio` — required for background recording.
 
+## FLAC
+
+FLAC recording captures PCM with `AVAudioEngine` and encodes it in-process with
+the pure-Rust `flacenc` encoder exported by the app's Rust library
+(`mic_flac_open`/`mic_flac_write`/`mic_flac_finish`). Those symbols are resolved
+at runtime with `dlsym`, so the Swift package still builds and tests on its own;
+when they are not linked (for example the standalone package build), a FLAC
+request degrades to WAV and reports `format: 'wav'` instead of an invalid file.
+
 ## Opus (optional)
 
 iOS Opus recording uses the libopus C library through a `COpus` SwiftPM system
